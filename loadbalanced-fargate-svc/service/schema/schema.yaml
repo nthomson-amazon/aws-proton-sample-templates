@@ -36,10 +36,10 @@ schema:
       type: object
       description: "Pipeline input properties"
       properties:
-        dockerfile:
+        builder:
           type: string
-          description: "The location of the Dockerfile to build"
-          default: "Dockerfile"
+          description: "The Cloud Native Buildpack builder to use to package the application container"
+          default: "paketobuildpacks/builder:base"
           minLength: 1
           maxLength: 100
         unit_test_command:

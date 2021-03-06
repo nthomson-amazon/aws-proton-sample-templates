@@ -24,62 +24,59 @@ Resources:
           - PublishRole
           - Arn
       Source:
-        BuildSpec:
-          Fn::Join:
-            - ""
-            - - >-
-                {
-                  "version": "0.2",
-                  "phases": {
-                    "install": {
-                      "runtime-versions": {
-                        "docker": 18
-                      },
-                      "commands": [
-                        "aws s3 cp s3://aws-proton-preview-public-files/model/proton-2020-07-20.normal.json .",
-                        "aws s3 cp s3://aws-proton-preview-public-files/model/waiters2.json .",
-                        "aws configure add-model --service-model file://proton-2020-07-20.normal.json --service-name proton-preview",
-                        "mv waiters2.json ~/.aws/models/proton-preview/2020-07-20/waiters-2.json",
-                        "echo 'f6bd1536a743ab170b35c94ed4c7c4479763356bd543af5d391122f4af852460  yq_linux_amd64' > yq_linux_amd64.sha",
-                        "wget https://github.com/mikefarah/yq/releases/download/3.4.0/yq_linux_amd64",
-                        "sha256sum -c yq_linux_amd64.sha",
-                        "mv yq_linux_amd64 /usr/bin/yq",
-                        "chmod +x /usr/bin/yq"
-                      ]
-                    },
-                    "pre_build": {
-                      "commands": [
-                        "cd $CODEBUILD_SRC_DIR",
-                        "$(aws ecr get-login --no-include-email --region $AWS_DEFAULT_REGION)",
-                        "{{ pipeline.unit_test_command }}",
-                      ]
-                    },
-                    "build": {
-                      "commands": [
-                        "IMAGE_REPO_NAME=$repo_name",
-                        "IMAGE_TAG=$CODEBUILD_BUILD_NUMBER",
-                        "IMAGE_ID=
-              - Ref: AWS::AccountId
-              - >-
-                .dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/$IMAGE_REPO_NAME:$IMAGE_TAG",
-                        "docker build -t $IMAGE_REPO_NAME:$IMAGE_TAG -f {{ pipeline.dockerfile }} .",
-                        "docker tag $IMAGE_REPO_NAME:$IMAGE_TAG $IMAGE_ID;",
-                        "docker push $IMAGE_ID"
-                      ]
-                    },
-                    "post_build": {
-                      "commands": [
-                        "aws proton-preview --endpoint-url https://proton.$AWS_DEFAULT_REGION.amazonaws.com --region $AWS_DEFAULT_REGION get-service --service-name $service_name | jq -r .service.spec > service.yaml",
-                        "yq w service.yaml 'instances[*].spec.image' \"$IMAGE_ID\" > rendered_service.yaml"
-                      ]
-                    }
-                  },
-                  "artifacts": {
-                    "files": [
-                      "rendered_service.yaml"
-                    ]
-                  }
-                }
+        BuildSpec: !Sub |
+          {
+            "version": "0.2",
+            "phases": {
+              "install": {
+                "runtime-versions": {
+                  "docker": 18
+                },
+                "commands": [
+                  "aws s3 cp s3://aws-proton-preview-public-files/model/proton-2020-07-20.normal.json .",
+                  "aws s3 cp s3://aws-proton-preview-public-files/model/waiters2.json .",
+                  "aws configure add-model --service-model file://proton-2020-07-20.normal.json --service-name proton-preview",
+                  "mv waiters2.json ~/.aws/models/proton-preview/2020-07-20/waiters-2.json",
+                  "echo 'f6bd1536a743ab170b35c94ed4c7c4479763356bd543af5d391122f4af852460  yq_linux_amd64' > yq_linux_amd64.sha",
+                  "wget https://github.com/mikefarah/yq/releases/download/3.4.0/yq_linux_amd64",
+                  "sha256sum -c yq_linux_amd64.sha",
+                  "mv yq_linux_amd64 /usr/bin/yq",
+                  "chmod +x /usr/bin/yq",
+                  "wget -q https://github.com/buildpacks/pack/releases/download/v0.17.0/pack-v0.17.0-linux.tgz -O - | tar -xz",
+                  "mv pack /usr/bin/pack",
+                  "chmod +x /usr/bin/pack"
+                ]
+              },
+              "pre_build": {
+                "commands": [
+                  "cd $CODEBUILD_SRC_DIR",
+                  "$(aws ecr get-login --no-include-email --region $AWS_DEFAULT_REGION)",
+                  "{{ pipeline.unit_test_command }}",
+                ]
+              },
+              "build": {
+                "commands": [
+                  "IMAGE_REPO_NAME=$repo_name",
+                  "IMAGE_TAG=$CODEBUILD_BUILD_NUMBER",
+                  "IMAGE_LATEST=${AWS::AccountId}.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/$IMAGE_REPO_NAME:latest",
+                  "IMAGE_CACHE=${AWS::AccountId}.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/$IMAGE_REPO_NAME:cache",
+                  "IMAGE_ID=${AWS::AccountId}.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/$IMAGE_REPO_NAME:$IMAGE_TAG",
+                  "pack build --no-color --builder {{ pipeline.builder }} --cache-image $IMAGE_CACHE --tag $IMAGE_ID $IMAGE_LATEST --publish"
+                ]
+              },
+              "post_build": {
+                "commands": [
+                  "aws proton-preview --endpoint-url https://proton.$AWS_DEFAULT_REGION.amazonaws.com --region $AWS_DEFAULT_REGION get-service --service-name $service_name | jq -r .service.spec > service.yaml",
+                  "yq w service.yaml 'instances[*].spec.image' \"$IMAGE_ID\" > rendered_service.yaml"
+                ]
+              }
+            },
+            "artifacts": {
+              "files": [
+                "rendered_service.yaml"
+              ]
+            }
+          }
         Type: CODEPIPELINE
       EncryptionKey:
         Fn::GetAtt:
@@ -206,6 +203,8 @@ Resources:
               - ecr:InitiateLayerUpload
               - ecr:PutImage
               - ecr:UploadLayerPart
+              - ecr:GetDownloadUrlForLayer
+              - ecr:BatchGetImage
             Effect: Allow
             Resource:
               Fn::GetAtt:
